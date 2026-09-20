@@ -13,14 +13,15 @@ fi
 # file checks
 input=$1
 
-if [ -e "$input" ] && [ ! -f "$input" ]; then # checks if file exists
+if [ -e "$input" ] && [ ! -f "$input" ]; then # arg 1 exists but is not a file
   echo -e "usage: input is not a file or it does not exist"
   exit 1
 
 elif [[ ! "$input" == *.vsc ]]; then # checks for correct extension
   echo -e "usage: input does not have the extension .vsc"
   exit 1
-elif [ ! -f "$input" ]; then # checks if file exists
+
+elif [ ! -f "$input" ]; then # correct extension but missing file
   echo -e "usage: input is not a file or it does not exist"
   exit 1
 
@@ -29,40 +30,43 @@ elif [ ! -s "$input" ]; then # checks if file empty by file size
   exit 1
 fi
 
+# Converts one decimal number into a 2-digit hex string.
+to_hex() {
+  printf '%02x' "$((10#$1))"
+}
+
 # reading the file
 line_num=0
 quit_seen=0
 instr_count=0
-bytes=""
-n_value=""
+dataArray=()
+n_values=""
 
 while IFS= read -r line || [ -n "$line" ]; do
-  line="${line%$'\r'}" # strip Window's formating
+  line="${line%$'\r'}" # strip Windows formatting
   line_num=$((line_num + 1))
 
   # Check that line 1 is either 0 or 2
-  if [ $line_num -eq 1 ]; then
-    n_value="$line"
+  if [ "$line_num" -eq 1 ]; then
+    n_values="$line"
 
-    if [ "$n_value" != "0" ] && [ "$n_value" != "2" ]; then
+    if [ "$n_values" != "0" ] && [ "$n_values" != "2" ]; then
       echo -e "usage: line 1 of $input must be 0 or 2"
       exit 1
     fi
     continue
   fi
 
-  # blank lines after QUIT are harmless therefore prevent error out
+  # blank lines after QUIT are harmless, so skip them
   if [ "$quit_seen" -eq 1 ] && [ -z "$line" ]; then
     continue
   fi
 
-  # Case 1: line 1 == 0
-  if [ "$n_value" -eq 0 ]; then
+  # Case 1: line 1 == 0 (n_value of 0)
+  if [ "$n_values" -eq 0 ]; then
     if [ "$line_num" -eq 2 ] && [ "$line" = "QUIT,0,0" ]; then
       opcode=8
-      byte1=$(( opcode * 4 ))
-      byte1_hex=$(printf '%02x' "$byte1")
-      bytes="$bytes $(printf '%02x' "$byte1") 00"
+      dataArray+=("$(to_hex $(( opcode * 4 )))" "00")
       quit_seen=1
       continue
     else
@@ -72,7 +76,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 
   fi
 
-  #Case 2: line 2 == 2
+  # Case 2: line 1 == 2 (n_value of 2)
   # Static Values
   if [ "$line_num" -eq 2 ] || [ "$line_num" -eq 3 ]; then
 
@@ -82,14 +86,12 @@ while IFS= read -r line || [ -n "$line" ]; do
       exit 1
     fi
 
-  value=$((10#$line)) # makes bash use base 10 instead of base 8
-    if [ "$value" -gt 128 ]; then
-      echo -e "usage: static value on line $line_num must be in be between 0 and 128 (inclusive)"
+    if [ "${#line}" -gt 3 ] || [ "$((10#$line))" -ge 128 ]; then
+      echo -e "usage: static value on line $line_num must be between 0 and 127 (inclusive)"
       exit 1
     fi
 
-    hex_byte=$(printf '%02x' "$value")
-    bytes="$bytes $hex_byte"
+    dataArray+=("$(to_hex "$line")")
     continue
   fi
 
@@ -139,7 +141,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     exit 1
   fi
   if (( 10#$reg > 3 )); then # again base 10 instead of 8
-    echo -e "usage: register must be 0, 1,2, or 3: $line"
+    echo -e "usage: register must be 0, 1, 2, or 3: $line"
     exit 1
   fi
 
@@ -156,12 +158,9 @@ while IFS= read -r line || [ -n "$line" ]; do
   fi
 
   # Encoding
-  byte1=$(( opcode * 4 + reg ))
-  byte1_hex=$(printf '%02x' "$byte1")
-  byte2_hex=$(printf '%02x' "$((10#$mem))") # safeguard against leading zeros in memory
-  bytes="$bytes $byte1_hex $byte2_hex"
+  dataArray+=("$(to_hex $(( opcode * 4 + 10#$reg )))" "$(to_hex "$mem")")
 
-  # Add instruction line to counter and check if total instructions exceed memory capacity
+  # Add instruction line to counter and check if total instructions exceed memory capacity (safety of 100 lines)
   instr_count=$((instr_count + 1))
   if [ "$ins" = "QUIT" ]; then
     quit_seen=1
@@ -180,8 +179,8 @@ if [ "$quit_seen" -ne 1 ]; then
   exit 1
 fi
 
-# determine type of program and it's title
-if [ "$n_value" -eq 0 ]; then
+# determine type of program and its title
+if [ "$n_values" -eq 0 ]; then
   title="It is a QUIT program"
 else
   title="It is an ADD/SUB program"
@@ -191,14 +190,14 @@ fi
 output="${input%.vsc}.bin"
 : > "$output" # making sure the file starts empty
 
-for b in $bytes; do
+for b in "${dataArray[@]}"; do
   printf "\\x$b" >> "$output"
 done
 
 # printing results to terminal
 echo "$title"
 echo "The content of the .bin file is"
-for b in $bytes; do
+for b in "${dataArray[@]}"; do
   echo "$b"
 done
 
