@@ -105,7 +105,56 @@ while IFS= read -r line; do
     exit 1
   fi
 
+  # Assigning opcode to each instruction
+  if [ "ins" = "LOAD" ]; then
+    opcode=1
+  elif [ "ins" = "STORE" ]; then
+    opcode=2
+  elif [ "ins" = "ADD" ]; then
+    opcode=3
+  elif [ "ins" = "SUB" ]; then
+    opcode=4
+  elif [ "ins" = "QUIT" ]; then
+    opcode=8
+  elif [ "ins" = "PRINT" ]; then
+    opcode=9
+  else
+    echo -e "usage: unrecognised instruction: $ins"
+    exit 1
+  fi
 
+  # Checking register input
+  if ! [[ "reg" =~ ^[0-9]+$ ]]; then
+    echo -e "usage: register must be a number: $line"
+    exit 1
+  fi
+  if (( reg < 0 || reg > 3 )); then
+    echo -e "usage: register must be 0, 1,2, or 3: $line"
+    exit 1
+  fi
+
+  # QUIT format check
+  if [ "ins" = "QUIT" ] && { [ "$reg" != 0 ] || [ "$mem" != 0 ] }; then
+    echo -e "usage: QUIT must be written as QUIT,0,0: $line"
+    exit 1
+  fi
+
+  # Encoding
+  byte1=$(( opcode * 4 + reg ))
+  byte1_hex=$(printf '%02x' "bytes1")
+  byte2_hex=$(printf '%02x' "$mem")
+  bytes="$bytes $byte1_hex $byte2_hex"
+
+  # Add instruction line to counter and check if total instructions exceed memory capacity
+  instr_count=$((instr_count + 1))
+  if [ "ins" = "QUIT" ]; then
+    quit_seen=1
+  fi
+
+  if [ "$instr_count" -gt 100 ]; then
+    echo -e "usage: program exceeds the 100 instruction limit"
+    exit 1
+  fi
 
 done < input
 
